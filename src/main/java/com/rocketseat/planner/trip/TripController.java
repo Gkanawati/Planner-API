@@ -46,7 +46,14 @@ public class TripController {
   private TripRepository repository;
 
   @PostMapping("")
-  public ResponseEntity<TripCreateResponse> createTrip(@RequestBody TripRequestPayload payload) {
+  public ResponseEntity<TripCreateResponse> createTrip(@RequestBody TripRequestPayload payload) throws Exception {
+    LocalDateTime startsAt = LocalDateTime.parse(payload.starts_at(), DateTimeFormatter.ISO_DATE_TIME);
+    LocalDateTime endsAt = LocalDateTime.parse(payload.ends_at(), DateTimeFormatter.ISO_DATE_TIME);
+
+    if (startsAt.isAfter(endsAt)) {
+      throw new Exception("The start date must be before the end date");
+    }
+
     Trip newTrip = new Trip(payload);
 
     this.repository.save(newTrip);
@@ -136,6 +143,14 @@ public class TripController {
 
     if (trip.isPresent()) {
       Trip rawTrip = trip.get();
+
+      LocalDateTime occursAt = LocalDateTime.parse(payload.occurs_at(), DateTimeFormatter.ISO_DATE_TIME);
+      LocalDateTime startsAt = rawTrip.getStartsAt();
+      LocalDateTime endsAt = rawTrip.getEndsAt();
+
+      if (occursAt.isBefore(startsAt) || occursAt.isAfter(endsAt)) {
+        throw new IllegalArgumentException("The activity date must be between the trip start and end dates");
+      }
 
       ActivityResponse activityResponse = this.activityService.registerActivity(payload, rawTrip);
 
