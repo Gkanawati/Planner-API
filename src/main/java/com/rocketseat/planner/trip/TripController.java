@@ -3,7 +3,6 @@ package com.rocketseat.planner.trip;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,6 +18,7 @@ import com.rocketseat.planner.activity.ActivityData;
 import com.rocketseat.planner.activity.ActivityRequestPayload;
 import com.rocketseat.planner.activity.ActivityResponse;
 import com.rocketseat.planner.activity.ActivityService;
+import com.rocketseat.planner.exception.ResourceNotFoundException;
 import com.rocketseat.planner.link.LinkData;
 import com.rocketseat.planner.link.LinkRequestPayload;
 import com.rocketseat.planner.link.LinkResponse;
@@ -64,137 +64,97 @@ public class TripController {
 
   @GetMapping("/{id}")
   public ResponseEntity<Trip> getTripDetails(@PathVariable UUID id) {
-    Optional<Trip> trip = this.repository.findById(id);
+    Trip trip = this.repository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Trip not found"));
 
-    return trip.map(ResponseEntity::ok).orElseGet(() -> ResponseEntity.notFound().build());
+    return ResponseEntity.ok(trip);
   }
 
   @PutMapping("/{id}")
   public ResponseEntity<Trip> updateTrip(@PathVariable UUID id, @RequestBody TripRequestPayload payload) {
-    Optional<Trip> trip = this.repository.findById(id);
+    Trip rawTrip = this.repository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Trip not found"));
 
-    if (trip.isPresent()) {
-      Trip rawTrip = trip.get();
-      rawTrip.setDestination(payload.destination());
-      rawTrip.setStartsAt(LocalDateTime.parse(payload.starts_at(), DateTimeFormatter.ISO_DATE_TIME));
-      rawTrip.setEndsAt(LocalDateTime.parse(payload.starts_at(), DateTimeFormatter.ISO_DATE_TIME));
+    rawTrip.setDestination(payload.destination());
+    rawTrip.setStartsAt(LocalDateTime.parse(payload.starts_at(), DateTimeFormatter.ISO_DATE_TIME));
+    rawTrip.setEndsAt(LocalDateTime.parse(payload.starts_at(), DateTimeFormatter.ISO_DATE_TIME));
 
-      this.repository.save(rawTrip);
+    this.repository.save(rawTrip);
 
-      return ResponseEntity.ok(rawTrip);
-    }
-
-    return ResponseEntity.notFound().build();
+    return ResponseEntity.ok(rawTrip);
   }
 
   @GetMapping("/{id}/confirm")
   public ResponseEntity<Trip> confirmTrip(@PathVariable UUID id) {
-    Optional<Trip> trip = this.repository.findById(id);
+    Trip rawTrip = this.repository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Trip not found"));
 
-    if (trip.isPresent()) {
-      Trip rawTrip = trip.get();
-      rawTrip.setIsConfirmed(true);
-      this.repository.save(rawTrip);
+    rawTrip.setIsConfirmed(true);
+    this.repository.save(rawTrip);
 
-      this.participantService.triggerConfirmationEmailToParticipants(id);
+    this.participantService.triggerConfirmationEmailToParticipants(id);
 
-      return ResponseEntity.ok(rawTrip);
-    }
-
-    return ResponseEntity.notFound().build();
+    return ResponseEntity.ok(rawTrip);
   }
 
   @PostMapping("/{id}/invite")
   public ResponseEntity<ParticipantCreateResponse> inviteParticipant(@PathVariable UUID id,
       @RequestBody ParticipantRequestPayload payload) {
-    Optional<Trip> trip = this.repository.findById(id);
+    Trip rawTrip = this.repository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Trip not found"));
 
-    if (trip.isPresent()) {
-      Trip rawTrip = trip.get();
+    ParticipantCreateResponse participantCreateResponse = this.participantService
+        .registerParticipantToEvent(payload.email(), rawTrip);
 
-      ParticipantCreateResponse participantCreateResponse = this.participantService
-          .registerParticipantToEvent(payload.email(), rawTrip);
-
-      if (rawTrip.getIsConfirmed()) {
-        this.participantService.triggerConfirmationEmailToParticipant(payload.email());
-      }
-
-      return ResponseEntity.ok(participantCreateResponse);
+    if (rawTrip.getIsConfirmed()) {
+      this.participantService.triggerConfirmationEmailToParticipant(payload.email());
     }
 
-    return ResponseEntity.notFound().build();
+    return ResponseEntity.ok(participantCreateResponse);
   }
 
   @GetMapping("/{id}/participants")
   public ResponseEntity<List<ParticipantData>> getTripParticipants(@PathVariable UUID id) {
-    Optional<Trip> trip = this.repository.findById(id);
+    this.repository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Trip not found"));
 
-    if (trip.isPresent()) {
-      return ResponseEntity.ok(this.participantService.getParticipantsByTripId(id));
-    }
-
-    return ResponseEntity.notFound().build();
+    return ResponseEntity.ok(this.participantService.getParticipantsByTripId(id));
   }
 
   @PostMapping("/{id}/activities")
   public ResponseEntity<ActivityResponse> registerActivity(@PathVariable UUID id,
       @RequestBody ActivityRequestPayload payload) {
-    Optional<Trip> trip = this.repository.findById(id);
+    Trip rawTrip = this.repository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Trip not found"));
 
-    if (trip.isPresent()) {
-      Trip rawTrip = trip.get();
+    LocalDateTime occursAt = LocalDateTime.parse(payload.occurs_at(), DateTimeFormatter.ISO_DATE_TIME);
+    LocalDateTime startsAt = rawTrip.getStartsAt();
+    LocalDateTime endsAt = rawTrip.getEndsAt();
 
-      LocalDateTime occursAt = LocalDateTime.parse(payload.occurs_at(), DateTimeFormatter.ISO_DATE_TIME);
-      LocalDateTime startsAt = rawTrip.getStartsAt();
-      LocalDateTime endsAt = rawTrip.getEndsAt();
-
-      if (occursAt.isBefore(startsAt) || occursAt.isAfter(endsAt)) {
-        throw new IllegalArgumentException("The activity date must be between the trip start and end dates");
-      }
-
-      ActivityResponse activityResponse = this.activityService.registerActivity(payload, rawTrip);
-
-      return ResponseEntity.ok(activityResponse);
+    if (occursAt.isBefore(startsAt) || occursAt.isAfter(endsAt)) {
+      throw new IllegalArgumentException("The activity date must be between the trip start and end dates");
     }
 
-    return ResponseEntity.notFound().build();
+    ActivityResponse activityResponse = this.activityService.registerActivity(payload, rawTrip);
+
+    return ResponseEntity.ok(activityResponse);
   }
 
   @GetMapping("/{id}/activities")
   public ResponseEntity<List<ActivityData>> getTripActivities(@PathVariable UUID id) {
-    Optional<Trip> trip = this.repository.findById(id);
+    this.repository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Trip not found"));
 
-    if (trip.isPresent()) {
-      return ResponseEntity.ok(this.activityService.getActivitiesByTripId(id));
-    }
-
-    return ResponseEntity.notFound().build();
+    return ResponseEntity.ok(this.activityService.getActivitiesByTripId(id));
   }
 
   @PostMapping("/{id}/links")
   public ResponseEntity<LinkResponse> registerLink(@PathVariable UUID id,
       @RequestBody LinkRequestPayload payload) {
-    Optional<Trip> trip = this.repository.findById(id);
+    Trip rawTrip = this.repository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Trip not found"));
 
-    if (trip.isPresent()) {
-      Trip rawTrip = trip.get();
+    LinkResponse linkResponse = this.linkService.registerLink(payload, rawTrip);
 
-      LinkResponse linkResponse = this.linkService.registerLink(payload, rawTrip);
-
-      return ResponseEntity.ok(linkResponse);
-    }
-
-    return ResponseEntity.notFound().build();
+    return ResponseEntity.ok(linkResponse);
   }
 
   @GetMapping("{id}/links")
   public ResponseEntity<List<LinkData>> getTripLinks(@PathVariable UUID id) {
-    Optional<Trip> trip = this.repository.findById(id);
+    this.repository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Trip not found"));
 
-    if (trip.isPresent()) {
-      return ResponseEntity.ok(this.linkService.getLinksByTripId(id));
-    }
-
-    return ResponseEntity.notFound().build();
+    return ResponseEntity.ok(this.linkService.getLinksByTripId(id));
   }
 }
